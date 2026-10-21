@@ -176,6 +176,12 @@ jobs:
           - crate: gpui-pre
             version: 0.3.7
             without: grid
+          - crate: gpui-pre
+            version: 0.3.9
+            without: font-fallback
+          - crate: gpui-pre
+            version: 0.3.9
+            without: grid
           - crate: gpui-ce
             version: 0.2.2
             without: font-fallback
