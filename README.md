@@ -1,5 +1,8 @@
 # gpui-mcp
 
+> This is the `gpui-kit-mcp` fork, tracking GPUI Kit 0.7.3 / `gpui-pre` 0.3.9.
+> See [FORK.md](FORK.md) for the divergence and upstream sync notes.
+
 Give MCP agents eyes and hands inside a
 [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) app.
 
@@ -196,23 +199,27 @@ Besides Zed's own GPUI, the bridge works with two GPUI releases on crates.io:
 
 | GPUI crate | Used by | Supported versions | Bridge feature |
 | --- | --- | --- | --- |
-| `gpui-pre` | GPUI Kit, `gpui-component` | 0.3.5, 0.3.6, 0.3.7 | `gpui-pre` |
+| `gpui-pre` | GPUI Kit, `gpui-component` | 0.3.5, 0.3.6, 0.3.7, 0.3.9 | `gpui-pre` |
 | `gpui-ce` | The community fork and apps built on it | 0.2.2 | `gpui-ce` |
 
 Each needs a small set of GPUI patches, which this repository provides. The
 recipes below pull in a patched copy from here.
 
-### GPUI Kit 0.7.0 (`gpui-pre` 0.3.7)
+### GPUI Kit 0.7.3 (`gpui-pre` 0.3.9)
+
+This fork carries the 0.3.9 patch series. Point the dependency at this
+repository (or a local path while developing); the upstream
+`themixednuts/gpui-mcp` repository stops at 0.3.7.
 
 Add this to your workspace's `Cargo.toml`:
 
 ```toml
 [dependencies]
-gpui-kit = "=0.7.0"
-gpui-mcp = { git = "https://github.com/themixednuts/gpui-mcp", branch = "main", default-features = false, features = ["gpui-pre"] }
+gpui-kit = "=0.7.3"
+gpui-mcp = { git = "<this-fork>", branch = "gpui-kit", default-features = false, features = ["gpui-pre"] }
 
 [patch.crates-io]
-gpui-pre = { git = "https://github.com/themixednuts/gpui-mcp", branch = "main" }
+gpui-pre = { git = "<this-fork>", branch = "gpui-kit" }
 ```
 
 Call `gpui_kit::init(cx)`, open the window with `gpui_kit::open_window`, and
@@ -284,13 +291,14 @@ patches are kept working.
   features must add `features = ["zed"]`.
 - Kit components that publish accessibility info work with all the tools.
   Custom-drawn components only show what they annotate.
-- In Kit 0.7.0, disabled controls report `enabled: true` and read-only inputs
-  don't report `read_only`. Kit doesn't publish these states yet.
+- GPUI Kit 0.7.x can report disabled controls as `enabled: true` and omit
+  `read_only`; the app must publish those states with `.aria_disabled(true)`
+  and `.aria_read_only(true)` when the component does not.
 - `gpui-mcp-html` works with GPUI Kit too: add it with
   `default-features = false, features = ["gpui-pre", "json", "ron"]`. Its CSS
   transitions and animations run on GPUI Kit's `gpui_base::motion`, which it
   resolves to the Kit release matching your gpui-pre (0.6.4+ for 0.3.5 and
-  0.3.6, 0.7 for 0.3.7). Its
+  0.3.6, 0.7.3 for 0.3.9). Its
   `grid-template-*` support needs the `grid.patch` described below, which the
   `[patch]` recipe already includes.
 
