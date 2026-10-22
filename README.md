@@ -1,5 +1,14 @@
 # gpui-mcp
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
+[![CI](https://github.com/xxxxzb/gpui-kit-mcp/actions/workflows/ci.yml/badge.svg?branch=gpui-kit)](https://github.com/xxxxzb/gpui-kit-mcp/actions/workflows/ci.yml)
+[![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![Rust 1.96+](https://img.shields.io/badge/rust-1.96%2B-orange.svg)](Cargo.toml)
+[![MCP](https://img.shields.io/badge/MCP-compatible-6f42c1.svg)](https://modelcontextprotocol.io)
+![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
+[![GitHub stars](https://img.shields.io/github/stars/xxxxzb/gpui-kit-mcp?style=social)](https://github.com/xxxxzb/gpui-kit-mcp/stargazers)
+
 > This is the `gpui-kit-mcp` fork, tracking GPUI Kit 0.7.3 / `gpui-pre` 0.3.9.
 > See [FORK.md](FORK.md) for the divergence and upstream sync notes.
 

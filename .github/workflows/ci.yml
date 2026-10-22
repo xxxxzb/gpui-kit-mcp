@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, gpui-kit]
   pull_request:
   schedule:
     - cron: "23 6 * * 1"
@@ -10,8 +10,9 @@ on:
 permissions:
   contents: read
 
-# A newer push to a pull request cancels its superseded run. Pushes to main and
-# scheduled runs each get their own group so main's results are never lost.
+# A newer push to a pull request cancels its superseded run. Pushes to main,
+# gpui-kit and scheduled runs each get their own group so their results are
+# never lost.
 concurrency:
   group: ci-${{ github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
