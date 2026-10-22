@@ -6,7 +6,7 @@ use super::{
 #[tool_router(router = connection_router)]
 impl GpuiMcp {
     #[tool(
-        description = "List live instrumented GPUI applications. A single app is selected automatically; when several are live, pass one returned target_id to select_app before using UI tools"
+        description = "List live instrumented GPUI applications. UI tools automatically use the only live app; when several are live, pass one returned target_id to select_app before using them"
     )]
     async fn list_apps(&self) -> Result<Json<Value>, String> {
         let apps = self.registry.list_apps().await?;

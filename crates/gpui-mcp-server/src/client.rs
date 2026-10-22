@@ -59,6 +59,8 @@ impl ConnectionPool {
 #[derive(Clone)]
 pub(crate) struct BridgeClient {
     descriptor: Arc<EndpointDescriptor>,
+    /// Descriptor file this client was discovered from, when it came from one.
+    descriptor_path: Option<Arc<PathBuf>>,
     next_request_id: Arc<AtomicU64>,
     pool: Arc<ConnectionPool>,
 }
@@ -78,6 +80,7 @@ impl BridgeClient {
         validate_descriptor(&descriptor, path)?;
         Ok(Self {
             descriptor: Arc::new(descriptor),
+            descriptor_path: Some(Arc::new(path.to_path_buf())),
             next_request_id: Arc::new(AtomicU64::new(1)),
             pool: Arc::new(ConnectionPool::new()),
         })
@@ -85,6 +88,16 @@ impl BridgeClient {
 
     pub(crate) fn descriptor(&self) -> &EndpointDescriptor {
         &self.descriptor
+    }
+
+    /// Whether the descriptor file this client came from still exists. A
+    /// gracefully stopped application removes it, so a missing file means the
+    /// selection points at a stopped instance.
+    fn descriptor_is_current(&self) -> bool {
+        let Some(path) = &self.descriptor_path else {
+            return true;
+        };
+        fs::symlink_metadata(path.as_path()).is_ok_and(|metadata| metadata.is_file())
     }
 
     pub(crate) fn target_id(&self) -> TargetId {
@@ -167,18 +180,20 @@ impl TargetId {
             return Err("target ID must end with a 16-digit instance identifier".to_owned());
         };
         AppId::new(app_id).map_err(|error| error.to_string())?;
-        if instance.len() != 16
-            || !instance.bytes().all(|byte| byte.is_ascii_hexdigit())
-            || u64::from_str_radix(instance, 16)
-                .ok()
-                .and_then(gpui_mcp_protocol::InstanceId::new)
-                .is_none()
-        {
+        if instance.len() != 16 || !instance.bytes().all(|byte| byte.is_ascii_hexdigit()) {
             return Err(
                 "target ID must end with a nonzero 16-digit instance identifier".to_owned(),
             );
         }
-        Ok(Self(value.to_owned()))
+        let instance = u64::from_str_radix(instance, 16)
+            .ok()
+            .and_then(gpui_mcp_protocol::InstanceId::new)
+            .ok_or_else(|| {
+                "target ID must end with a nonzero 16-digit instance identifier".to_owned()
+            })?;
+        // Identifiers are reported with lowercase hex; accept either case and
+        // keep one canonical form so lookups compare equal.
+        Ok(Self(format!("{app_id}-{:016x}", instance.get())))
     }
 
     pub(crate) fn as_str(&self) -> &str {
@@ -245,26 +260,19 @@ impl BridgeRegistry {
         }
     }
 
+    /// List live targets without changing the selection. Selection happens on
+    /// the first app-scoped call, or explicitly through [`Self::select`].
     pub(crate) async fn list_apps(&self) -> Result<Vec<AppInfo>, String> {
         let clients = self
             .discover()
             .await
             .map_err(|error| format_discovery_error(&error))?;
-        let mut selected = self.selected.write().await;
-        if selected.as_ref().is_some_and(|selected| {
-            clients
-                .iter()
-                .all(|client| client.target_id() != selected.target_id())
-        }) {
-            *selected = None;
-        }
-        if selected.is_none()
-            && let [client] = clients.as_slice()
-        {
-            *selected = Some(client.clone());
-        }
-        let selected_id = selected.as_ref().map(BridgeClient::target_id);
-        drop(selected);
+        let selected_id = self
+            .selected
+            .read()
+            .await
+            .as_ref()
+            .map(BridgeClient::target_id);
         Ok(clients
             .iter()
             .map(|client| {
@@ -297,13 +305,19 @@ impl BridgeRegistry {
     }
 
     pub(crate) async fn client(&self) -> Result<BridgeClient, String> {
-        if let Some(client) = self.selected.read().await.clone() {
-            return Ok(client);
+        let selected = self.selected.read().await.clone();
+        if let Some(client) = &selected
+            && client.descriptor_is_current()
+        {
+            return Ok(client.clone());
         }
         let clients = self
             .discover()
             .await
             .map_err(|error| format_discovery_error(&error))?;
+        if let Some(stale) = selected {
+            return self.replace_stale_selection(&stale, &clients).await;
+        }
         match clients.as_slice() {
             [] => Err(
                 "no live GPUI applications were found; start an instrumented app and retry"
@@ -314,25 +328,45 @@ impl BridgeRegistry {
                 *self.selected.write().await = Some(client.clone());
                 Ok(client)
             }
-            _ => {
-                let listing = clients
-                    .iter()
-                    .map(|client| {
-                        let descriptor = client.descriptor();
-                        format!(
-                            "{} ({}, pid {}, target {})",
-                            descriptor.app_name,
-                            descriptor.app_id,
-                            descriptor.pid,
-                            client.target_id()
-                        )
-                    })
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                Err(format!(
-                    "multiple GPUI applications are live [{listing}]; call list_apps, then select_app"
-                ))
+            _ => Err(format!(
+                "multiple GPUI applications are live [{}]; call list_apps, then select_app",
+                describe_targets(&clients)
+            )),
+        }
+    }
+
+    /// Replace a selection whose application restarted. Only a single live
+    /// instance of the same application ID is adopted; a different application
+    /// is never selected implicitly.
+    async fn replace_stale_selection(
+        &self,
+        stale: &BridgeClient,
+        clients: &[BridgeClient],
+    ) -> Result<BridgeClient, String> {
+        let app_id = &stale.descriptor().app_id;
+        let replacements = clients
+            .iter()
+            .filter(|client| &client.descriptor().app_id == app_id)
+            .collect::<Vec<_>>();
+        match replacements.as_slice() {
+            [replacement] => {
+                let replacement = (*replacement).clone();
+                *self.selected.write().await = Some(replacement.clone());
+                Ok(replacement)
             }
+            [] if clients.is_empty() => Err(format!(
+                "the selected GPUI target {} is no longer live; start an instrumented app, then call list_apps",
+                stale.target_id()
+            )),
+            [] => Err(format!(
+                "the selected GPUI target {} is no longer live; live targets: [{}]. Call list_apps, then select_app",
+                stale.target_id(),
+                describe_targets(clients)
+            )),
+            _ => Err(format!(
+                "the selected GPUI target {} is no longer live and several live instances use application {app_id}; call list_apps, then select_app",
+                stale.target_id()
+            )),
         }
     }
 
@@ -350,6 +384,23 @@ impl BridgeRegistry {
 
 fn format_discovery_error(error: &anyhow::Error) -> String {
     format!("GPUI bridge discovery failed: {error:#}")
+}
+
+fn describe_targets(clients: &[BridgeClient]) -> String {
+    clients
+        .iter()
+        .map(|client| {
+            let descriptor = client.descriptor();
+            format!(
+                "{} ({}, pid {}, target {})",
+                descriptor.app_name,
+                descriptor.app_id,
+                descriptor.pid,
+                client.target_id()
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 async fn exchange(
@@ -446,6 +497,7 @@ async fn discover_clients(
             probes.spawn(async move {
                 let client = BridgeClient {
                     descriptor: Arc::new(descriptor),
+                    descriptor_path: Some(Arc::new(path)),
                     next_request_id: Arc::new(AtomicU64::new(1)),
                     pool: Arc::new(ConnectionPool::new()),
                 };
@@ -887,9 +939,133 @@ mod tests {
         let apps = registry.list_apps().await.map_err(anyhow::Error::msg)?;
         assert_eq!(apps.len(), 1);
         assert_eq!(apps[0].app_id.as_str(), "beta");
-        assert!(apps[0].selected);
+        assert!(!apps[0].selected, "listing must not select an application");
+        assert_eq!(
+            registry
+                .client()
+                .await
+                .map_err(anyhow::Error::msg)?
+                .target_id()
+                .as_str(),
+            "beta-000000000000000b"
+        );
         alpha_task.abort();
         beta_task.abort();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_apps_does_not_select_an_application() -> Result<()> {
+        let directory = tempdir()?;
+        let endpoint = test_endpoint_named(directory.path(), "listing");
+        let listener_task = serve_test_listener(create_test_listener(&endpoint)?);
+        write_named_test_descriptor(
+            &directory.path().join("listing.json"),
+            std::process::id(),
+            endpoint,
+            "listing-app",
+            0x1,
+        )?;
+        let registry = BridgeRegistry::new(None, None, Some(directory.path().to_path_buf()));
+
+        let listed = registry.list_apps().await.map_err(anyhow::Error::msg)?;
+        assert_eq!(listed.len(), 1);
+        assert!(!listed[0].selected);
+
+        let client = registry.client().await.map_err(anyhow::Error::msg)?;
+        assert_eq!(client.target_id().as_str(), "listing-app-0000000000000001");
+
+        let listed = registry.list_apps().await.map_err(anyhow::Error::msg)?;
+        assert!(listed[0].selected);
+        listener_task.abort();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn list_apps_keeps_selection_when_the_selected_application_is_missed() -> Result<()> {
+        let directory = tempdir()?;
+        let first_endpoint = test_endpoint_named(directory.path(), "kept");
+        let first_task = serve_test_listener(create_test_listener(&first_endpoint)?);
+        write_named_test_descriptor(
+            &directory.path().join("kept.json"),
+            std::process::id(),
+            first_endpoint,
+            "kept-app",
+            0x1,
+        )?;
+        let registry = BridgeRegistry::new(None, None, Some(directory.path().to_path_buf()));
+        let selected = registry.client().await.map_err(anyhow::Error::msg)?;
+        assert_eq!(selected.target_id().as_str(), "kept-app-0000000000000001");
+
+        // A discovery probe that misses the selected application must not move
+        // selection to the other live application.
+        let second_endpoint = test_endpoint_named(directory.path(), "other");
+        let second_task = serve_test_listener(create_test_listener(&second_endpoint)?);
+        write_named_test_descriptor(
+            &directory.path().join("other.json"),
+            std::process::id(),
+            second_endpoint,
+            "other-app",
+            0x2,
+        )?;
+        first_task.abort();
+        let _ = first_task.await;
+
+        let listed = registry.list_apps().await.map_err(anyhow::Error::msg)?;
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].app_id.as_str(), "other-app");
+        assert!(!listed[0].selected);
+
+        match registry.client().await {
+            Ok(client) => assert_eq!(client.target_id().as_str(), "kept-app-0000000000000001"),
+            Err(error) => assert!(error.contains("kept-app-0000000000000001"), "{error}"),
+        }
+        second_task.abort();
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn registry_refuses_to_retarget_a_different_application() -> Result<()> {
+        let directory = tempdir()?;
+        let gone_endpoint = test_endpoint_named(directory.path(), "gone");
+        let gone_task = serve_test_listener(create_test_listener(&gone_endpoint)?);
+        let gone_path = directory.path().join("gone.json");
+        write_named_test_descriptor(
+            &gone_path,
+            std::process::id(),
+            gone_endpoint,
+            "gone-app",
+            0x1,
+        )?;
+        let registry = BridgeRegistry::new(None, None, Some(directory.path().to_path_buf()));
+        registry.client().await.map_err(anyhow::Error::msg)?;
+
+        gone_task.abort();
+        let _ = gone_task.await;
+        fs::remove_file(&gone_path)?;
+
+        let other_endpoint = test_endpoint_named(directory.path(), "other");
+        let other_task = serve_test_listener(create_test_listener(&other_endpoint)?);
+        write_named_test_descriptor(
+            &directory.path().join("other.json"),
+            std::process::id(),
+            other_endpoint,
+            "other-app",
+            0x2,
+        )?;
+
+        let error = match registry.client().await {
+            Ok(client) => {
+                return Err(anyhow::anyhow!(
+                    "a selected target that is gone must be an error, got {}",
+                    client.target_id()
+                ));
+            }
+            Err(error) => error,
+        };
+        assert!(error.contains("gone-app-0000000000000001"), "{error}");
+        assert!(error.contains("other-app"), "{error}");
+        other_task.abort();
         Ok(())
     }
 
@@ -908,11 +1084,11 @@ mod tests {
         )?;
         let registry = BridgeRegistry::new(None, None, Some(directory.path().to_path_buf()));
 
-        let before = registry.list_apps().await.map_err(anyhow::Error::msg)?;
-        assert_eq!(before[0].target_id.as_str(), "restartable-0000000000000001");
-        assert!(before[0].selected);
+        let before = registry.client().await.map_err(anyhow::Error::msg)?;
+        assert_eq!(before.target_id().as_str(), "restartable-0000000000000001");
 
         first_task.abort();
+        let _ = first_task.await;
         fs::remove_file(&first_path)?;
         assert!(
             registry
@@ -934,7 +1110,12 @@ mod tests {
 
         let after = registry.list_apps().await.map_err(anyhow::Error::msg)?;
         assert_eq!(after[0].target_id.as_str(), "restartable-0000000000000002");
-        assert!(after[0].selected);
+        assert!(!after[0].selected);
+        let recovered = registry.client().await.map_err(anyhow::Error::msg)?;
+        assert_eq!(
+            recovered.target_id().as_str(),
+            "restartable-0000000000000002"
+        );
         second_task.abort();
         Ok(())
     }
