@@ -216,10 +216,10 @@ Add this to your workspace's `Cargo.toml`:
 ```toml
 [dependencies]
 gpui-kit = "=0.7.3"
-gpui-mcp = { git = "<this-fork>", branch = "gpui-kit", default-features = false, features = ["gpui-pre"] }
+gpui-mcp = { git = "https://github.com/xxxxzb/gpui-kit-mcp", branch = "gpui-kit", default-features = false, features = ["gpui-pre"] }
 
 [patch.crates-io]
-gpui-pre = { git = "<this-fork>", branch = "gpui-kit" }
+gpui-pre = { git = "https://github.com/xxxxzb/gpui-kit-mcp", branch = "gpui-kit" }
 ```
 
 Call `gpui_kit::init(cx)`, open the window with `gpui_kit::open_window`, and
