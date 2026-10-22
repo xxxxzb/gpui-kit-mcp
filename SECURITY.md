@@ -12,7 +12,7 @@ Until the first stable release, only the current main branch is supported with s
 
 ## Reporting
 
-Do not open a public issue for a vulnerability that exposes credentials, enables unauthenticated control, crosses the target-window boundary, bypasses a configured limit, or writes/reads unintended files. Use [GitHub's private vulnerability reporting form](https://github.com/themixednuts/gpui-mcp/security/advisories/new) and include:
+Do not open a public issue for a vulnerability that exposes credentials, enables unauthenticated control, crosses the target-window boundary, bypasses a configured limit, or writes/reads unintended files. Use [GitHub's private vulnerability reporting form](https://github.com/xxxxzb/gpui-kit-mcp/security/advisories/new) and include:
 
 - affected commit and operating system;
 - minimal reproduction;

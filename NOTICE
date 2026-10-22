@@ -1,0 +1,16 @@
+gpui-kit-mcp
+https://github.com/xxxxzb/gpui-kit-mcp
+
+This project is a fork of gpui-mcp:
+https://github.com/themixednuts/gpui-mcp
+Copyright the gpui-mcp contributors.
+Licensed under the Apache License, Version 2.0.
+
+Modifications in this fork:
+- Added gpui-pre 0.3.9 support (GPUI Kit 0.7.3).
+- Ported the automation patch series from 0.3.7 to 0.3.9.
+- Updated the GPUI Kit demo/consumer recipe and CI matrix.
+- Added fork documentation (FORK.md, this NOTICE).
+
+The vendored GPUI source under `vendor/` retains its original copyright and
+license headers. See `LICENSE` for the full Apache-2.0 text.

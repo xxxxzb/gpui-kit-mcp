@@ -16,7 +16,7 @@ It works on Windows 11, macOS, and Linux.
 Install the MCP server and add it to your MCP client:
 
 ```console
-cargo install --git https://github.com/themixednuts/gpui-mcp --locked gpui-mcp-server
+cargo install --git https://github.com/xxxxzb/gpui-kit-mcp --locked gpui-mcp-server
 ```
 
 ```json
@@ -29,13 +29,13 @@ Add the bridge and its GPUI build to your app:
 [dependencies]
 gpui = "=0.2.2"
 gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "16c9aa7ea6d897a8044d9501cde1b295256722f2", features = ["font-kit", "wayland", "x11"] }
-gpui-mcp = { git = "https://github.com/themixednuts/gpui-mcp", branch = "main" }
+gpui-mcp = { git = "https://github.com/xxxxzb/gpui-kit-mcp", branch = "gpui-kit" }
 
 [patch.crates-io]
-gpui = { git = "https://github.com/themixednuts/gpui-mcp", branch = "main" }
+gpui = { git = "https://github.com/xxxxzb/gpui-kit-mcp", branch = "gpui-kit" }
 
 [patch."https://github.com/zed-industries/zed"]
-gpui = { git = "https://github.com/themixednuts/gpui-mcp", branch = "main" }
+gpui = { git = "https://github.com/xxxxzb/gpui-kit-mcp", branch = "gpui-kit" }
 ```
 
 Both patches are required. They keep your app, `gpui_platform`, and the bridge
@@ -238,10 +238,10 @@ Add this to your workspace's `Cargo.toml`:
 [dependencies]
 gpui-ce = "=0.2.2"
 gpui_ce_platform = "=0.1.0"
-gpui-mcp = { git = "https://github.com/themixednuts/gpui-mcp", branch = "main", default-features = false, features = ["gpui-ce"] }
+gpui-mcp = { git = "https://github.com/xxxxzb/gpui-kit-mcp", branch = "gpui-kit", default-features = false, features = ["gpui-ce"] }
 
 [patch.crates-io]
-gpui-ce = { git = "https://github.com/themixednuts/gpui-mcp", branch = "main" }
+gpui-ce = { git = "https://github.com/xxxxzb/gpui-kit-mcp", branch = "gpui-kit" }
 ```
 
 `gpui-ce` is imported as `gpui`, so install the bridge as usual when you open
@@ -349,4 +349,6 @@ environment. See [SECURITY.md](SECURITY.md).
 
 ## License
 
-Apache-2.0.
+Apache-2.0. This fork is based on
+[`themixednuts/gpui-mcp`](https://github.com/themixednuts/gpui-mcp); see
+[NOTICE](NOTICE) for attribution and the list of modifications.
