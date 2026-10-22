@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use gpui_mcp_protocol::{Capability, MAX_MESSAGE_PAGE, MessagePage, MessageSender, NewMessage};
+use gpui_mcp_protocol::{MAX_MESSAGE_PAGE, MessagePage, MessageSender, NewMessage};
 use schemars::JsonSchema;
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
@@ -128,16 +128,10 @@ impl GpuiMcp {
         Parameters(args): Parameters<SendMessageArgs>,
     ) -> Result<Json<Value>, String> {
         let client = self.client().await?;
-        if !client
-            .descriptor()
-            .capabilities
-            .supports(Capability::Messages)
-        {
-            return Err(
-                "the selected application does not read messages (it has not registered BridgeHandle::on_message)"
-                    .to_owned(),
-            );
-        }
+        // The descriptor is a snapshot from connection time; the app may
+        // register `on_message` after that snapshot. The bridge is the
+        // authority on whether messages are accepted, so do not gate on the
+        // cached capability here.
         let message = NewMessage {
             text: args.text,
             kind: args.kind,
