@@ -47,6 +47,7 @@ mod live_document;
 mod messages;
 mod tree;
 mod visual;
+mod window;
 
 use messages::{MESSAGES_URI, watch_app_messages};
 
@@ -439,6 +440,7 @@ impl GpuiMcp {
         router.merge(messages::router());
         router.merge(tree::router());
         router.merge(visual::router());
+        router.merge(window::router());
         router
     }
 
@@ -684,7 +686,13 @@ impl GpuiMcp {
     }
 
     async fn capture(&self, target: ScreenshotTarget) -> Result<Screenshot, String> {
-        self.settle_requested_frames(Duration::from_secs(2)).await?;
+        // An occluded window, a window on another Space, or one the user is not
+        // interacting with may never complete a requested frame. Native capture
+        // still reads the last composited frame, so a settle timeout must not
+        // turn the screenshot into an error.
+        if let Err(error) = self.settle_requested_frames(Duration::from_secs(2)).await {
+            tracing::warn!(%error, "frame settlement before screenshot failed");
+        }
         let client = self.client().await?;
         crate::capture::capture(&client, target).await
     }
@@ -1854,6 +1862,7 @@ mod tests {
                 "diff_screenshots",
                 "start_video_recording",
                 "stop_video_recording",
+                "resize_window",
             ]
             .map(str::to_owned),
         );

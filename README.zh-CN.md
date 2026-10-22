@@ -103,6 +103,7 @@ div()
 | 发现 | `list_apps`、`select_app`、`get_ui_tree`、`find_elements`、`get_element` |
 | 操作 | `click_element`、`type_text`、`set_text`、`set_value`、`keyboard`、`hover_element`、`drag_element`、`scroll`、`pointer_*` |
 | 验证 | `wait_for_element`、`wait_for_state`、`get_element_state`、`save_ui_snapshot`、`diff_current_ui` |
+| 窗口 | `resize_window` 按逻辑像素设置内容区尺寸，并返回实际达到的尺寸 |
 | 像素 | `screenshot`、`screenshot_element`、`compare_screenshots`、`start_video_recording` |
 | 标注 | `annotate_elements`、`remove_annotations`、`list_annotations`、`highlight_elements`、`clear_highlights` |
 | 与应用对话 | `read_messages`、`wait_for_messages`、`send_message`、`gpui://messages` 资源 |

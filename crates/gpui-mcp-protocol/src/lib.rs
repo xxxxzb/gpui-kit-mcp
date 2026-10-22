@@ -1201,6 +1201,13 @@ pub enum Operation {
     },
     /// Return current GPUI client-area geometry for native region capture.
     GetWindowGeometry,
+    /// Resize the window's content area in GPUI logical pixels.
+    ResizeWindow {
+        /// Target content width in logical pixels.
+        width: f32,
+        /// Target content height in logical pixels.
+        height: f32,
+    },
     /// Replace the current highlight set.
     SetHighlights {
         /// Bounded highlight list.
@@ -1421,7 +1428,7 @@ impl WireResponse {
 mod tests {
     use super::{
         AppId, Capabilities, EndpointDescriptor, InstanceId, LocalEndpoint, NativeWindowId,
-        PROTOCOL_VERSION, Point, ProcessId, Rect, RequestId, WireResponse,
+        Operation, PROTOCOL_VERSION, Point, ProcessId, Rect, RequestId, WireResponse,
     };
 
     #[test]
@@ -1520,6 +1527,19 @@ mod tests {
         let parsed: EndpointDescriptor = serde_json::from_value(value)?;
 
         assert_eq!(parsed, descriptor);
+        Ok(())
+    }
+
+    #[test]
+    fn resize_window_operation_round_trips() -> Result<(), Box<dyn std::error::Error>> {
+        let operation = Operation::ResizeWindow {
+            width: 900.0,
+            height: 700.0,
+        };
+        let value = serde_json::to_value(&operation)?;
+        assert_eq!(value["kind"], "resize_window");
+        let parsed: Operation = serde_json::from_value(value)?;
+        assert_eq!(parsed, operation);
         Ok(())
     }
 

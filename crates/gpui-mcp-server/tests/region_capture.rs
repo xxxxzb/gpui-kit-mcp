@@ -311,9 +311,14 @@ impl support::FixtureClient for Server {
     }
 }
 
+/// Windowed tests share one desktop: a window one test opens can occlude the
+/// other test's fixture, and the occluded window then stops drawing frames.
+static DESKTOP: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 #[tokio::test]
 async fn a_region_crop_carries_the_focus_ring_the_full_window_capture_carries() -> Result<(), String>
 {
+    let _desktop = DESKTOP.lock().await;
     if !has_a_desktop_session() {
         eprintln!("skipping: this machine has no desktop session to open a window on");
         return Ok(());
@@ -334,7 +339,91 @@ async fn a_region_crop_carries_the_focus_ring_the_full_window_capture_carries() 
     outcome
 }
 
-async fn measure(server: &mut Server) -> Result<(), String> {
+#[tokio::test]
+async fn resize_window_reaches_the_requested_content_size() -> Result<(), String> {
+    let _desktop = DESKTOP.lock().await;
+    if !has_a_desktop_session() {
+        eprintln!("skipping: this machine has no desktop session to open a window on");
+        return Ok(());
+    }
+    let directory = TempDir::new()
+        .map_err(|error| format!("could not create a temporary directory: {error}"))?;
+    let endpoints = directory.path().join("endpoints");
+    std::fs::create_dir_all(&endpoints)
+        .map_err(|error| format!("could not create the endpoint directory: {error}"))?;
+    let fixture = Fixture::start(&endpoints)?;
+    let mut server = Server::start(&endpoints, &directory.path().join("artifacts"))?;
+
+    let outcome = measure_resize(&mut server).await;
+
+    let outcome = outcome.map_err(|error| support::fixture_failure(&fixture.log, &error));
+    server.stop().await;
+    fixture.stop().await;
+    outcome
+}
+
+async fn measure_resize(server: &mut Server) -> Result<(), String> {
+    initialize(server).await?;
+    wait_for_the_fixture(server).await?;
+
+    // Two sizes, because a one-off resize can hide a state bug where the second
+    // request is clamped to the first or only the platform window moves while
+    // GPUI keeps laying out for the old viewport.
+    for (width, height) in [(900.0_f64, 700.0_f64), (1_280.0, 760.0)] {
+        let response = server
+            .call_json("resize_window", json!({ "width": width, "height": height }))
+            .await?;
+        let bounds = response
+            .get("content_bounds")
+            .ok_or_else(|| "resize_window returned no content bounds".to_owned())?;
+        let read = |name: &str| {
+            bounds
+                .get(name)
+                .and_then(JsonValue::as_f64)
+                .ok_or_else(|| format!("resize_window returned no {name}"))
+        };
+        let (actual_width, actual_height) = (read("width")?, read("height")?);
+        assert!(
+            (actual_width - width).abs() <= 1.0 && (actual_height - height).abs() <= 1.0,
+            "window reached {actual_width}x{actual_height}, not {width}x{height}"
+        );
+
+        // The semantic tree is the layout's own view of the viewport, so this is
+        // what "responsive at another width" actually means.
+        let tree = server.call_json("get_ui_tree", json!({})).await?;
+        let root = tree
+            .get("nodes")
+            .and_then(|nodes| nodes.get("demo-root"))
+            .and_then(|node| node.get("bounds"))
+            .ok_or_else(|| "the fixture published no root bounds".to_owned())?;
+        let (x, y, laid_out_width, laid_out_height) = rectangle(root)?;
+        assert!(
+            (x - 0.0).abs() <= 1.0 && (y - 0.0).abs() <= 1.0,
+            "the root must stay at the window origin, was {x},{y}"
+        );
+        assert!(
+            (laid_out_width - width).abs() <= 1.0 && (laid_out_height - height).abs() <= 1.0,
+            "layout is {laid_out_width}x{laid_out_height}, not {width}x{height}"
+        );
+
+        // The capture proves the platform surface changed too, not just the
+        // layout numbers the bridge reports.
+        let scale = response
+            .get("scale_factor")
+            .and_then(JsonValue::as_f64)
+            .ok_or_else(|| "resize_window returned no scale factor".to_owned())?;
+        let image = server.call_image("screenshot", json!({})).await?;
+        let captured_width = f64::from(image.width());
+        assert!(
+            (captured_width - width * scale).abs() <= 8.0,
+            "capture is {captured_width} physical pixels wide, expected about {}",
+            width * scale
+        );
+    }
+    Ok(())
+}
+
+async fn initialize(server: &mut Server) -> Result<(), String> {
     server
         .request(
             "initialize",
@@ -348,6 +437,11 @@ async fn measure(server: &mut Server) -> Result<(), String> {
     server
         .send(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized", "params": {} }))
         .await?;
+    Ok(())
+}
+
+async fn measure(server: &mut Server) -> Result<(), String> {
+    initialize(server).await?;
     wait_for_the_fixture(server).await?;
 
     let tree = server.call_json("get_ui_tree", json!({})).await?;

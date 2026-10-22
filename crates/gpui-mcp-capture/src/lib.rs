@@ -14,6 +14,14 @@ const MAX_ENCODED_BYTES: usize = 16 * 1024 * 1024;
 #[cfg(any(target_os = "windows", test))]
 const COMPOSITOR_POLL_INTERVAL: Duration = Duration::from_millis(16);
 const MIN_STABILITY_DEADLINE: Duration = Duration::from_millis(32);
+#[cfg(target_os = "macos")]
+const SCREENCAPTURE_POLL_INTERVAL: Duration = Duration::from_millis(10);
+/// Hard deadline for the macOS `screencapture` helper.
+///
+/// A healthy window capture takes a few hundred milliseconds. The helper runs as a child
+/// process so a `WindowServer` stall ends with `kill` instead of an abandoned blocked thread.
+#[cfg(target_os = "macos")]
+const SCREENCAPTURE_DEADLINE: Duration = Duration::from_secs(10);
 const MAX_STABILITY_DEADLINE: Duration = Duration::from_secs(2);
 const DEFAULT_SETTLE_DEADLINE: Duration = Duration::from_secs(1);
 #[cfg(any(target_os = "windows", test))]
@@ -401,11 +409,7 @@ fn capture_frame(
         .width()
         .and_then(|width| native_window.height().map(|height| (width, height)))
         .map_err(|_| CaptureFailure::CaptureUnavailable)?;
-    let image = settle(&mut || {
-        native_window
-            .capture_image()
-            .map_err(|_| CaptureFailure::CaptureUnavailable)
-    })?;
+    let image = settle(&mut || capture_pixels(&native_window))?;
     validate_image_dimensions(&image)?;
     Ok(NativeFrame {
         image,
@@ -413,6 +417,102 @@ fn capture_frame(
         scale_factor,
         reported_size,
     })
+}
+
+/// macOS captures through the system `screencapture` helper instead of calling the obsolete
+/// `CGWindowListCreateImage` in-process.
+///
+/// Since macOS 15 that call is deprecated, can return `SLSWindowListCreateImageProxying`
+/// timeouts while the `WindowServer` is busy, and loads `ReplayKit` permanently into the calling
+/// process. A short-lived helper keeps a stalled capture from wedging the MCP server and exits
+/// with the `ReplayKit` state it pulled in.
+#[cfg(target_os = "macos")]
+fn capture_pixels(window: &xcap::Window) -> Result<RgbaImage, CaptureFailure> {
+    let window = window
+        .id()
+        .map_err(|_| CaptureFailure::CaptureUnavailable)
+        .and_then(|id| NativeWindowId::new(id).ok_or(CaptureFailure::CaptureUnavailable))?;
+    let path = temp_capture_path(window);
+    let status = run_screencapture(window, &path);
+    let decoded = status.and_then(|status| {
+        if !status.success() {
+            return Err(CaptureFailure::CaptureUnavailable);
+        }
+        let bytes = std::fs::read(&path).map_err(|_| CaptureFailure::CaptureUnavailable)?;
+        image::load_from_memory(&bytes)
+            .map(image::DynamicImage::into_rgba8)
+            .map_err(|_| CaptureFailure::Encoding)
+    });
+    let _ = std::fs::remove_file(&path);
+    decoded
+}
+
+#[cfg(target_os = "macos")]
+fn temp_capture_path(window: NativeWindowId) -> std::path::PathBuf {
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let sequence = NEXT.fetch_add(1, Ordering::Relaxed);
+    std::env::temp_dir().join(format!(
+        "gpui-mcp-capture-{}-{}-{sequence}.png",
+        std::process::id(),
+        window.get()
+    ))
+}
+
+#[cfg(target_os = "macos")]
+fn run_screencapture(
+    window: NativeWindowId,
+    path: &std::path::Path,
+) -> Result<std::process::ExitStatus, CaptureFailure> {
+    use std::process::{Command, Stdio};
+    use std::time::Instant;
+
+    let mut child = Command::new("/usr/sbin/screencapture")
+        .args(screencapture_arguments(window, path))
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .map_err(|_| CaptureFailure::CaptureUnavailable)?;
+    let deadline = Instant::now() + SCREENCAPTURE_DEADLINE;
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => return Ok(status),
+            Ok(None) if Instant::now() < deadline => {
+                std::thread::sleep(SCREENCAPTURE_POLL_INTERVAL);
+            }
+            Ok(None) | Err(_) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err(CaptureFailure::CaptureUnavailable);
+            }
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn screencapture_arguments(
+    window: NativeWindowId,
+    path: &std::path::Path,
+) -> Vec<std::ffi::OsString> {
+    [
+        "-x".into(),
+        "-o".into(),
+        "-l".into(),
+        window.get().to_string().into(),
+        "-t".into(),
+        "png".into(),
+        path.as_os_str().to_owned(),
+    ]
+    .to_vec()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn capture_pixels(window: &xcap::Window) -> Result<RgbaImage, CaptureFailure> {
+    window
+        .capture_image()
+        .map_err(|_| CaptureFailure::CaptureUnavailable)
 }
 
 #[cfg(target_os = "windows")]
@@ -779,6 +879,49 @@ mod tests {
         MAX_MEASURED_ALLOWANCE, MIN_FRESHNESS_SAMPLES, RegionMapping, capture_fresh_frame,
         region_mapping, validate_target,
     };
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn screencapture_helper_requests_one_window_as_png_without_shadow_or_sound()
+    -> Result<(), CaptureFailure> {
+        use std::ffi::OsString;
+
+        let window = gpui_mcp_protocol::NativeWindowId::new(40_505)
+            .ok_or(CaptureFailure::CaptureUnavailable)?;
+        let arguments = super::screencapture_arguments(window, "/tmp/window.png".as_ref());
+        assert_eq!(
+            arguments,
+            [
+                OsString::from("-x"),
+                OsString::from("-o"),
+                OsString::from("-l"),
+                OsString::from("40505"),
+                OsString::from("-t"),
+                OsString::from("png"),
+                OsString::from("/tmp/window.png"),
+            ]
+        );
+        Ok(())
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn screencapture_helper_gives_up_on_a_missing_window() -> Result<(), CaptureFailure> {
+        let window =
+            gpui_mcp_protocol::NativeWindowId::new(1).ok_or(CaptureFailure::CaptureUnavailable)?;
+        let started = Instant::now();
+        let result = super::run_screencapture(window, "/tmp/gpui-mcp-capture-test.png".as_ref());
+        assert!(
+            result.is_err() || result.is_ok_and(|status| !status.success()),
+            "a nonexistent window must not produce a successful capture"
+        );
+        assert!(
+            started.elapsed() < super::SCREENCAPTURE_DEADLINE + Duration::from_secs(2),
+            "the helper deadline must bound the wait; took {:?}",
+            started.elapsed()
+        );
+        Ok(())
+    }
 
     #[test]
     fn rejects_empty_and_non_finite_regions_before_native_access() {

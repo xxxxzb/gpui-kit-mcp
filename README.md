@@ -114,6 +114,7 @@ transitions (see [Motion](docs/visual-builder.md#motion)).
 | Discover | `list_apps`, `select_app`, `get_ui_tree`, `find_elements`, `get_element` |
 | Act | `click_element`, `type_text`, `set_text`, `set_value`, `keyboard`, `hover_element`, `drag_element`, `scroll`, `pointer_*` |
 | Verify | `wait_for_element`, `wait_for_state`, `get_element_state`, `save_ui_snapshot`, `diff_current_ui` |
+| Window | `resize_window` sets the content size in logical pixels and reports the size that was reached |
 | Pixels | `screenshot`, `screenshot_element`, `compare_screenshots`, `start_video_recording` |
 | Annotate | `annotate_elements`, `remove_annotations`, `list_annotations`, `highlight_elements`, `clear_highlights` |
 | Talk to the app | `read_messages`, `wait_for_messages`, `send_message`, the `gpui://messages` resource |

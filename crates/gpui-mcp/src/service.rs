@@ -8,7 +8,7 @@ use std::thread;
 use std::time::Duration;
 
 use async_channel::{Receiver, Sender};
-use gpui::{App, Window};
+use gpui::{App, Window, px, size};
 use gpui_mcp_protocol::{
     Annotation, AnnotationSource, AppId, ApplicationCommandDescriptor, ApplicationCommandResult,
     BridgeError, BridgeResult, Capabilities, Capability, ContextResource,
@@ -39,6 +39,8 @@ use crate::input;
 use crate::registry::{AnnotationChange, SharedState};
 
 const MAX_CONNECTIONS: usize = 8;
+/// Largest accepted content-side for a programmatic window resize, in logical pixels.
+const MAX_WINDOW_SIZE: f32 = 16_384.0;
 const COMMAND_CAPACITY: usize = 64;
 const IO_TIMEOUT: Duration = Duration::from_secs(2);
 const CONNECTION_IDLE_TIMEOUT: Duration = Duration::from_mins(30);
@@ -821,6 +823,11 @@ fn handle_ui_operation(
         Operation::GetPointerLocation => Ok(BridgeResult::PointerLocation(
             input::pointer_location(window),
         )),
+        Operation::ResizeWindow { width, height } => {
+            window.resize(size(px(width), px(height)));
+            window.request_frame();
+            Ok(BridgeResult::Ack)
+        }
         // Highlights are painted by the observer's overlay pass, which runs after the scene on
         // every frame whether or not views replay from cache, so a frame is all they need.
         Operation::ClearHighlights => {
@@ -1200,6 +1207,7 @@ async fn process_request(request: WireRequest, context: ConnectionContext) -> Wi
         operation @ (Operation::Input { .. }
         | Operation::PointerInput { .. }
         | Operation::Focus { .. }
+        | Operation::ResizeWindow { .. }
         | Operation::Refresh
         | Operation::RequestFrame
         | Operation::GetPendingFrame
@@ -1284,6 +1292,18 @@ fn validate_operation(operation: &Operation) -> Result<(), BridgeError> {
             Err(invalid(
                 "frame report limit must be between 1 and 512 frames",
             ))
+        }
+        Operation::ResizeWindow { width, height } => {
+            if !width.is_finite()
+                || !height.is_finite()
+                || !(1.0..=MAX_WINDOW_SIZE).contains(width)
+                || !(1.0..=MAX_WINDOW_SIZE).contains(height)
+            {
+                return Err(invalid(
+                    "window size must be finite and between 1 and 16384 logical pixels",
+                ));
+            }
+            Ok(())
         }
         Operation::SetHighlights { highlights } => validate_highlights(highlights),
         Operation::UpsertAnnotations {
@@ -1758,10 +1778,11 @@ fn invalid(message: &'static str) -> BridgeError {
 
 #[cfg(test)]
 mod tests {
-    use gpui_mcp_protocol::{AppId, ContextResource, ContextResourceDescriptor};
+    use gpui_mcp_protocol::{AppId, ContextResource, ContextResourceDescriptor, Operation};
 
     use super::{
         BridgeConfig, encode_hex, validate_context_resource, validate_context_resource_list,
+        validate_operation,
     };
 
     #[test]
@@ -1780,6 +1801,25 @@ mod tests {
     #[test]
     fn token_encoding_is_fixed_width() {
         assert_eq!(encode_hex(&[0, 15, 16, 255]), "000f10ff");
+    }
+
+    #[test]
+    fn window_resize_rejects_sizes_outside_the_supported_range() {
+        let resize = |width, height| Operation::ResizeWindow { width, height };
+        assert!(validate_operation(&resize(900.0, 700.0)).is_ok());
+        for operation in [
+            resize(0.0, 700.0),
+            resize(900.0, 0.0),
+            resize(-1.0, 700.0),
+            resize(f32::INFINITY, 700.0),
+            resize(900.0, f32::NAN),
+            resize(16_385.0, 700.0),
+        ] {
+            assert!(
+                validate_operation(&operation).is_err(),
+                "{operation:?} must be rejected"
+            );
+        }
     }
 
     #[test]
