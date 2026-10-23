@@ -11,32 +11,50 @@ use sha2::{Digest as _, Sha256};
 
 use crate::patch::{self, Files};
 
-/// The patches in each version's series, applied in this order.
-const SERIES: [Patch; 3] = [Patch::Automation, Patch::FontFallback, Patch::Grid];
+/// The patches in the gpui-pre and gpui-ce series, applied in this order.
+const GPUI_SERIES: [Patch; 3] = [Patch::Automation, Patch::FontFallback, Patch::Grid];
+/// The patches in the gpui-fast series. The font and grid fixes serve
+/// gpui-mcp-html, which has no gpui-fast backend, so the bridge patch is all
+/// this series carries.
+const GPUI_FAST_SERIES: [Patch; 1] = [Patch::Automation];
 
 #[derive(Clone, Copy, PartialEq, Eq, ValueEnum)]
 pub(crate) enum Crate {
     /// The release GPUI Kit and gpui-component use.
     #[value(name = "gpui-pre")]
-    GpuiPre,
+    Pre,
     /// The community fork of GPUI.
     #[value(name = "gpui-ce")]
-    GpuiCe,
+    Ce,
+    /// The retained-mode fork GPUI Kit 0.8 renders through behind its
+    /// `gpui-fast` feature.
+    #[value(name = "gpui-fast")]
+    Fast,
 }
 
 impl Crate {
     fn name(self) -> &'static str {
         match self {
-            Self::GpuiPre => "gpui-pre",
-            Self::GpuiCe => "gpui-ce",
+            Self::Pre => "gpui-pre",
+            Self::Ce => "gpui-ce",
+            Self::Fast => "gpui-fast",
         }
     }
 
     /// The crate's key in the workspace's `[workspace.dependencies]`.
     fn dependency_key(self) -> &'static str {
         match self {
-            Self::GpuiPre => "gpui_pre",
-            Self::GpuiCe => "gpui_ce",
+            Self::Pre => "gpui_pre",
+            Self::Ce => "gpui_ce",
+            Self::Fast => "gpui_fast",
+        }
+    }
+
+    /// The patch series this crate's vendored copy carries.
+    fn series(self) -> &'static [Patch] {
+        match self {
+            Self::Pre | Self::Ce => &GPUI_SERIES,
+            Self::Fast => &GPUI_FAST_SERIES,
         }
     }
 }
@@ -86,6 +104,15 @@ pub(crate) fn run(root: &Path, args: &VendorArgs) -> Result<()> {
     if args.without.contains(&Patch::Automation) {
         bail!("the automation patch is what the bridge needs and can't be left out");
     }
+    for patch in &args.without {
+        if !args.krate.series().contains(patch) {
+            bail!(
+                "{} carries no {} patch to leave out",
+                args.krate.name(),
+                patch.name()
+            );
+        }
+    }
     let vendor = root.join("vendor").join(name);
     let patches = root.join("vendor/patches").join(name);
     let metadata: serde_json::Value = serde_json::from_str(
@@ -100,7 +127,7 @@ pub(crate) fn run(root: &Path, args: &VendorArgs) -> Result<()> {
         .context("missing `versions`")?;
     check_requirement(root, args.krate, supported.keys().map(String::as_str))?;
     for version in supported.keys() {
-        for patch in SERIES {
+        for patch in args.krate.series() {
             let path = patches
                 .join(version)
                 .join(format!("{}.patch", patch.name()));
@@ -136,9 +163,12 @@ pub(crate) fn run(root: &Path, args: &VendorArgs) -> Result<()> {
         );
     }
 
-    let applied: Vec<_> = SERIES
-        .into_iter()
+    let applied: Vec<_> = args
+        .krate
+        .series()
+        .iter()
         .filter(|patch| !args.without.contains(patch))
+        .copied()
         .collect();
     let files = patched_release(name, version, release, &patches.join(version), &applied)?;
     let applied: Vec<_> = applied.iter().map(|patch| patch.name()).collect();
