@@ -8,8 +8,9 @@ GPUI ships an equivalent.
 | --- | --- | --- |
 | `gpui/` | GPUI 0.2.2 from Zed commit `16c9aa7ea6d897a8044d9501cde1b295256722f2` | The `zed` backend |
 | `gpui-pre/` | The crates.io `gpui-pre` 0.3.9 release (Zed commit `93d745668805029476e6d7fbb19652116fed51de`), as used by GPUI Kit 0.7.3 | The `gpui-pre` backend |
+| `gpui-fast/` | The crates.io `gpui-fast` 0.1.10 release, the retained renderer GPUI Kit 0.8 can select | The `gpui-fast` backend |
 | `gpui-ce/` | The crates.io `gpui-ce` 0.2.2 release, the community fork of GPUI | The `gpui-ce` backend |
-| `patches/<crate>/<version>/` | The patches for each supported `gpui-pre` and `gpui-ce` version | `gpui-pre/`, `gpui-ce/` and downstream apps |
+| `patches/<crate>/<version>/` | The patches for each supported `gpui-pre`, `gpui-fast` and `gpui-ce` version | `gpui-pre/`, `gpui-fast/`, `gpui-ce/` and downstream apps |
 
 Each copy keeps its Apache-2.0 license in `LICENSE-APACHE`.
 
@@ -19,17 +20,26 @@ The changes are listed in [`gpui/PATCHES.md`](gpui/PATCHES.md). The ones
 present on 2026-09-22 were still unmerged upstream that day. The frame-cost
 changes added on 2026-09-23 were written against the same commit.
 
-## `gpui-pre/` and `gpui-ce/`
+## `gpui-pre/`, `gpui-fast/` and `gpui-ce/`
 
-Both carry the same changes as `gpui/`, so all three backends behave the same
-way. This includes the parts GPUI Kit depends on:
+`gpui-pre` and `gpui-ce` carry the same changes as `gpui/`, so the three
+immediate-mode backends behave the same way. This includes the parts GPUI
+Kit depends on:
 
 - Accessibility elements from other crates are observed.
 - Clicks and other interactions are still detected through wrapper elements.
 - Focusing a Kit input focuses the editor inside it.
 
-The Kit demo's tests cover control states, focus, Unicode text replacement and
-redaction.
+`gpui-fast` is a retained renderer, so its series rewires the view-cache
+tracking into its own record system: `view_drawn` fires at the reuse and
+rebuild decision points in `fast/retained.rs` and `fast/splice.rs`, replayed
+subtrees attribute their nested views, and the redaction boundary rides the
+retained record instead of a per-view cache key. The bridge sees the same
+API; one behavior is genuinely different: fast retains uncached views, so
+frame reports attribute fewer renders per interaction.
+
+The Kit demos' tests cover control states, focus, Unicode text replacement
+and redaction.
 
 Each copy is the published crate with three changes: the patches are applied,
 source files use LF line endings, and the published `Cargo.lock` is removed.
@@ -39,10 +49,13 @@ source files use LF line endings, and the published `Cargo.lock` is removed.
 | Crate | Versions | Vendored here |
 | --- | --- | --- |
 | `gpui-pre` | 0.3.5, 0.3.6, 0.3.7, 0.3.9 | 0.3.9 |
+| `gpui-fast` | 0.1.10 | 0.1.10 |
 | `gpui-ce` | 0.2.2 | 0.2.2 |
 
-Each version has its own folder in `patches/<crate>/<version>/` with three
-patches, applied in this order:
+Each version has its own folder in `patches/<crate>/<version>/`, applied in
+this order. `gpui-pre` and `gpui-ce` carry all three patches; the
+`gpui-fast` series carries only `automation.patch`, because the other two
+serve `gpui-mcp-html`, which has no fast backend:
 
 1. `automation.patch`: everything the bridge needs.
 2. `font-fallback.patch`: keeps the requested weight and style when a font
@@ -67,10 +80,14 @@ change differs:
   into helper functions yet.
 - `gpui-ce` has no touch gestures, so it has no touch changes, and it shows
   tooltips from a different spot in `div.rs`.
+- `gpui-fast` keeps the view cache in `fast/retained.rs` records rather than
+  in `view.rs`, so its automation patch hooks the reuse and rebuild decision
+  points there, and its own modules that read the pointer follow the
+  `PointerState` change.
 
-`gpui-pre.json` and `gpui-ce.json` list each version with its download
-checksum, and say which version is vendored here. For `gpui-pre`, they also
-record the Zed commit the release was cut from.
+`gpui-pre.json`, `gpui-fast.json` and `gpui-ce.json` list each version with
+its download checksum, and say which version is vendored here. For
+`gpui-pre`, they also record the Zed commit the release was cut from.
 
 ### Commands
 
@@ -82,10 +99,11 @@ lists every option.
 ```console
 # Check that a vendored copy matches the published crate plus the patches
 cargo xtask vendor --crate gpui-pre --check
+cargo xtask vendor --crate gpui-fast --check
 cargo xtask vendor --crate gpui-ce --check
 
 # Rebuild a vendored copy from the published crate
-cargo xtask vendor --crate gpui-ce
+cargo xtask vendor --crate gpui-fast
 
 # Write a patched copy of any supported version somewhere else
 cargo xtask vendor --crate gpui-pre --version 0.3.5 --output <dir>
@@ -99,29 +117,32 @@ workspace `Cargo.toml` doesn't match its `.json` file.
 
 ### What CI checks
 
-- Both vendored copies match the published crate plus their patches.
+- All three vendored copies match the published crate plus their patches.
 - The bridge builds, passes its tests and passes Clippy on every OS against
-  both vendored copies.
+  all three vendored copies.
 - On Linux it does the same against patched `gpui-pre` 0.3.5, 0.3.6, 0.3.7 and
   0.3.9, against `gpui-pre` 0.3.9 and `gpui-ce` 0.2.2 without the font patch,
-  and against `gpui-pre` 0.3.9 without the grid patch.
+  against `gpui-pre` 0.3.9 without the grid patch, and against patched
+  `gpui-fast` 0.1.10.
 - `gpui-mcp-html` builds, passes its tests and passes Clippy against the
   vendored `gpui-pre` as well as the Zed tree.
-- The Kit demo builds and passes its tests.
+- The Kit demos build and pass their tests.
 - The bridge builds and passes its tests on Rust 1.95, the oldest version it
   supports.
 - Fresh apps that install the bridge from the pushed Git commit build, one for
-  GPUI Kit and one for `gpui-ce`. In each, the app's GPUI crates and the bridge
-  must share a single patched GPUI.
+  GPUI Kit on `gpui-pre`, one for GPUI Kit 0.8 on `gpui-fast`, and one for
+  `gpui-ce`. In each, the app's GPUI crates and the bridge must share a single
+  patched GPUI.
 
 To run that last check yourself against a pushed commit:
 
 ```console
 cargo xtask check-consumer --backend gpui-kit --repository https://github.com/themixednuts/gpui-mcp --rev <full-commit-sha> --target-dir target
+cargo xtask check-consumer --backend gpui-fast --repository https://github.com/themixednuts/gpui-mcp --rev <full-commit-sha> --target-dir target
 cargo xtask check-consumer --backend gpui-ce --repository https://github.com/themixednuts/gpui-mcp --rev <full-commit-sha> --target-dir target
 ```
 
-The Kit demo is a separate workspace. Cargo would otherwise turn on both the
+The Kit demos are separate workspaces. Cargo would otherwise turn on both the
 `zed` and `gpui-pre` features of the bridge at once, which is not allowed. For
 the same reason, `--all-features` on the main workspace fails on purpose.
 

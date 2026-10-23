@@ -9,7 +9,8 @@
 ![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 [![GitHub stars](https://img.shields.io/github/stars/xxxxzb/gpui-kit-mcp?style=social)](https://github.com/xxxxzb/gpui-kit-mcp/stargazers)
 
-> 这是 `gpui-kit-mcp` fork，跟踪 GPUI Kit 0.7.3 / `gpui-pre` 0.3.9。
+> 这是 `gpui-kit-mcp` fork，跟踪 GPUI Kit 0.7.3（`gpui-pre` 0.3.9）与
+> GPUI Kit 0.8.0 的 `gpui-fast` 渲染后端（`gpui-fast` 0.1.10）。
 > 分叉差异和上游同步说明见 [FORK.md](FORK.md)。
 
 让 MCP agent 在 [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui)
@@ -203,13 +204,14 @@ Agent 用 `read_messages` 读取应用消息（下次把返回的 `latest_id` �
 聊天循环可以这样提示 agent：“用你见过的最新 id 调 `wait_for_messages`，处理应用发来的
 每条消息，用 `send_message` 回答，然后继续等待。”
 
-## GPUI Kit、`gpui-pre` 和 `gpui-ce`
+## GPUI Kit、`gpui-pre`、`gpui-fast` 和 `gpui-ce`
 
-除了 Zed 自己的 GPUI，桥接还支持 crates.io 上的两个 GPUI 发行版：
+除了 Zed 自己的 GPUI，桥接还支持 crates.io 上的三个 GPUI 发行版：
 
 | GPUI crate | 使用方 | 支持版本 | 桥接 feature |
 | --- | --- | --- | --- |
 | `gpui-pre` | GPUI Kit、`gpui-component` | 0.3.5、0.3.6、0.3.7、0.3.9 | `gpui-pre` |
+| `gpui-fast` | GPUI Kit 0.8 的保留模式渲染器 | 0.1.10 | `gpui-fast` |
 | `gpui-ce` | 社区 fork 及其应用 | 0.2.2 | `gpui-ce` |
 
 每个版本都需要一小组 GPUI 补丁，本仓库提供。下面的配方会从本仓库拉取打好补丁的副本。
@@ -238,6 +240,36 @@ gpui-pre = { git = "https://github.com/xxxxzb/gpui-kit-mcp", branch = "gpui-kit"
 cargo run --manifest-path examples/gpui-kit/Cargo.toml
 ```
 
+### GPUI Kit 0.8.0（`gpui-fast` 0.1.10）
+
+GPUI Kit 0.8 可以选择通过 `gpui-fast`（GPUI 的保留模式 fork）渲染。桥接
+同样支持这个后端，机制与上面一致：本仓库 vendor 了带 automation 补丁
+系列的 `gpui-fast` 副本，桥接链接它而不是 `gpui-pre`。
+
+Kit 的两个渲染后端是编译期二选一，桥接的 backend feature 必须与 Kit
+实际渲染用的那个一致。在你的 workspace `Cargo.toml` 加：
+
+```toml
+[dependencies]
+gpui-kit = { version = "=0.8.0", features = ["gpui-fast"] }
+gpui-mcp = { git = "https://github.com/xxxxzb/gpui-kit-mcp", branch = "gpui-kit", default-features = false, features = ["gpui-fast"] }
+
+[patch.crates-io]
+gpui-fast = { git = "https://github.com/xxxxzb/gpui-kit-mcp", branch = "gpui-kit" }
+```
+
+Kit 的 `gpui-pre` 依赖仍在图中，但开着 `gpui-fast` feature 时不链接任何
+东西；桥接直接接受 Kit 的 `Window` 和 `App`，与 0.7.3 配方完全一样。
+
+有一处视图追踪的差异是真实行为：即时模式每帧重建未缓存的视图，
+`gpui-fast` 把它保留下来，所以 fast 应用的 frame report 在一次交互里
+上报的渲染次数更少。语义树、来源信息、输入、截图等其余观测能力一致。
+想看实际效果，运行 [Kit fast demo](examples/gpui-kit-fast)：
+
+```console
+cargo run --manifest-path examples/gpui-kit-fast/Cargo.toml
+```
+
 ### `gpui-ce` 0.2.2
 
 在工作区的 `Cargo.toml` 里加：
@@ -260,7 +292,7 @@ gpui-ce = { git = "https://github.com/xxxxzb/gpui-kit-mcp", branch = "gpui-kit" 
 或者你自己带 GPUI 补丁，就保留自己的补丁副本：
 
 1. 在本仓库的 checkout 里，把打好补丁的副本写进你的应用。
-   `gpui-ce` 用 `--crate gpui-ce`。
+   `gpui-ce` 用 `--crate gpui-ce`，`gpui-fast` 用 `--crate gpui-fast`。
 
    ```console
    cargo xtask vendor --crate gpui-pre --version 0.3.5 --output /path/to/your-app/vendor/gpui-pre
@@ -274,7 +306,9 @@ gpui-ce = { git = "https://github.com/xxxxzb/gpui-kit-mcp", branch = "gpui-kit" 
    gpui-pre = { path = "vendor/gpui-pre" }
    ```
 
-补丁在 [`vendor/patches/`](vendor/patches)，每个 crate、每个版本一个目录。每个版本有三个：
+补丁在 [`vendor/patches/`](vendor/patches)，每个 crate、每个版本一个目录。
+`gpui-pre` 与 `gpui-ce` 系列每个版本有三个补丁，`gpui-fast` 系列只带
+`automation.patch`：
 
 - `automation.patch`：桥接需要的全部改动。
 - `font-fallback.patch`：一个无关的字体修复。加 `--without font-fallback` 可以跳过。

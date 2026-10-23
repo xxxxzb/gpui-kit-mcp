@@ -10,7 +10,7 @@ members = [
     "examples/runtime-showcase",
     "xtask",
 ]
-exclude = ["vendor/gpui", "vendor/gpui-pre", "vendor/gpui-ce", "examples/gpui-kit"]
+exclude = ["vendor/gpui", "vendor/gpui-pre", "vendor/gpui-ce", "vendor/gpui-fast", "examples/gpui-kit", "examples/gpui-kit-fast"]
 default-members = ["crates/gpui-mcp-server"]
 resolver = "3"
 
