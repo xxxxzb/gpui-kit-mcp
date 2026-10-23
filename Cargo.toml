@@ -94,6 +94,7 @@ opt-level = 2
 gpui = { path = "vendor/gpui" }
 gpui-pre = { path = "vendor/gpui-pre" }
 gpui-ce = { path = "vendor/gpui-ce" }
+gpui-fast = { path = "vendor/gpui-fast" }
 
 [patch."https://github.com/zed-industries/zed"]
 gpui = { path = "vendor/gpui" }

@@ -120,6 +120,15 @@ jobs:
       - name: Clippy gpui-ce bridge
         run: cargo clippy -p gpui-mcp --all-targets --no-default-features --features gpui-ce,test-support,gpui_ce/test-support --locked -- -D warnings
 
+      - name: Check gpui-fast integration
+        run: cargo check -p gpui-mcp --no-default-features --features gpui-fast --locked
+
+      - name: Test bridge with gpui-fast
+        run: cargo test -p gpui-mcp --no-default-features --features gpui-fast,test-support --locked
+
+      - name: Clippy gpui-fast bridge
+        run: cargo clippy -p gpui-mcp --all-targets --no-default-features --features gpui-fast,test-support --locked -- -D warnings
+
       - name: Upload visual parity failure artifacts
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -153,6 +162,7 @@ jobs:
 
       - run: cargo xtask vendor --crate gpui-pre --check
       - run: cargo xtask vendor --crate gpui-ce --check
+      - run: cargo xtask vendor --crate gpui-fast --check
 
   patch-series:
     # The main matrix builds the bridge against the vendored releases. This job
@@ -186,6 +196,8 @@ jobs:
           - crate: gpui-ce
             version: 0.2.2
             without: font-fallback
+          - crate: gpui-fast
+            version: 0.1.10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
