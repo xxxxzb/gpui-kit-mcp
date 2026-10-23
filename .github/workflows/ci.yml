@@ -170,6 +170,10 @@ jobs:
     # archive and builds and tests the bridge against the result, so a patch
     # that stops applying or compiling fails here rather than downstream.
     # The bridge feature for each crate has the crate's name.
+    # Rows with compile: false only check that the patch series applies.
+    # gpui-fast 0.1.10 pins the shared gpui-pre-* sub-crates to =0.3.9, so an
+    # older gpui-pre cannot resolve in the same workspace as the bridge's
+    # optional gpui_fast dependency.
     name: ${{ matrix.crate }} ${{ matrix.version }}${{ matrix.without && format(' without {0}', matrix.without) || '' }}
     runs-on: ubuntu-24.04
     strategy:
@@ -178,15 +182,19 @@ jobs:
         include:
           - crate: gpui-pre
             version: 0.3.5
+            compile: false
           - crate: gpui-pre
             version: 0.3.6
+            compile: false
           # The optional patches must stay independent of the automation patch.
           - crate: gpui-pre
             version: 0.3.7
             without: font-fallback
+            compile: false
           - crate: gpui-pre
             version: 0.3.7
             without: grid
+            compile: false
           - crate: gpui-pre
             version: 0.3.9
             without: font-fallback
@@ -235,7 +243,7 @@ jobs:
       # workspace accepts (it accepts every gpui-pre the bridge does), then
       # select the patched release.
       - name: Resolve the patched release
-        if: matrix.crate == 'gpui-pre'
+        if: matrix.crate == 'gpui-pre' && matrix.compile != false
         env:
           CRATE: ${{ matrix.crate }}
           VERSION: ${{ matrix.version }}
@@ -250,6 +258,7 @@ jobs:
       # The bridge's unit tests need the GPUI crate's own test support, which
       # its test-support feature doesn't turn on for gpui-ce.
       - name: Test bridge
+        if: matrix.compile != false
         env:
           CRATE: ${{ matrix.crate }}
         run: >-
@@ -258,6 +267,7 @@ jobs:
           --config "patch.crates-io.$CRATE.path='$RUNNER_TEMP/$CRATE'"
 
       - name: Check that the bridge resolved the patched release
+        if: matrix.compile != false
         env:
           CRATE: ${{ matrix.crate }}
           VERSION: ${{ matrix.version }}
@@ -267,6 +277,7 @@ jobs:
           --depth 1 --prefix none | grep -Fx "$CRATE v$VERSION ($RUNNER_TEMP/$CRATE)"
 
       - name: Clippy
+        if: matrix.compile != false
         env:
           CRATE: ${{ matrix.crate }}
         run: >-
@@ -278,14 +289,14 @@ jobs:
       # GPUI Kit motion. The runtime needs every optional patch (grid layout),
       # so rows without one skip it.
       - name: Test HTML runtime and view transitions
-        if: matrix.crate == 'gpui-pre' && !matrix.without
+        if: matrix.crate == 'gpui-pre' && !matrix.without && matrix.compile != false
         run: >-
           cargo test -p gpui-mcp-html -p gpui-view-transitions --no-default-features
           --features "gpui-mcp-html/gpui-pre,gpui-mcp-html/json,gpui-mcp-html/ron,gpui-mcp-html/dev-watch"
           --config "patch.crates-io.gpui-pre.path='$RUNNER_TEMP/gpui-pre'"
 
       - name: Clippy HTML runtime and view transitions
-        if: matrix.crate == 'gpui-pre' && !matrix.without
+        if: matrix.crate == 'gpui-pre' && !matrix.without && matrix.compile != false
         run: >-
           cargo clippy -p gpui-mcp-html -p gpui-view-transitions --all-targets --no-default-features
           --features "gpui-mcp-html/gpui-pre,gpui-mcp-html/json,gpui-mcp-html/ron,gpui-mcp-html/dev-watch"
