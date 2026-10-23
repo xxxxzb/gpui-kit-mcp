@@ -9,17 +9,30 @@
 #[cfg(any(
     all(feature = "zed", feature = "gpui-pre"),
     all(feature = "zed", feature = "gpui-ce"),
+    all(feature = "zed", feature = "gpui-fast"),
     all(feature = "gpui-pre", feature = "gpui-ce"),
+    all(feature = "gpui-pre", feature = "gpui-fast"),
+    all(feature = "gpui-ce", feature = "gpui-fast"),
 ))]
 compile_error!(
     "select one GPUI backend: use default-features = false with features = [\"gpui-pre\"] \
-     for gpui-kit, or features = [\"gpui-ce\"] for gpui-ce"
+     for GPUI Kit on gpui-pre, features = [\"gpui-fast\"] for GPUI Kit's gpui-fast renderer, \
+     or features = [\"gpui-ce\"] for gpui-ce"
 );
-#[cfg(not(any(feature = "zed", feature = "gpui-pre", feature = "gpui-ce")))]
-compile_error!("select a GPUI backend: enable `zed` (the default), `gpui-pre` or `gpui-ce`");
+#[cfg(not(any(
+    feature = "zed",
+    feature = "gpui-pre",
+    feature = "gpui-ce",
+    feature = "gpui-fast"
+)))]
+compile_error!(
+    "select a GPUI backend: enable `zed` (the default), `gpui-pre`, `gpui-ce` or `gpui-fast`"
+);
 
 #[cfg(feature = "gpui-ce")]
 extern crate gpui_ce as gpui;
+#[cfg(feature = "gpui-fast")]
+extern crate gpui_fast as gpui;
 #[cfg(feature = "gpui-pre")]
 extern crate gpui_pre as gpui;
 

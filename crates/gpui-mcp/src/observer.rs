@@ -1358,13 +1358,22 @@ mod tests {
             "the other region replays its previous frame: {:?}",
             report.last_frame_views
         );
-        assert_eq!(
-            outcome(&report, root.entity_id()),
-            Some((ViewOutcome::Rendered, Some(ViewRenderCause::Uncached)))
+        // gpui-pre rebuilds the uncached window view every frame; gpui-fast
+        // retains it, so the hovered region is the only view that rebuilds
+        // and the root replays around it.
+        #[cfg(not(feature = "gpui-fast"))]
+        let (root_expected, views_rendered, views_reused) = (
+            Some((ViewOutcome::Rendered, Some(ViewRenderCause::Uncached))),
+            2,
+            1,
         );
+        #[cfg(feature = "gpui-fast")]
+        let (root_expected, views_rendered, views_reused) =
+            (Some((ViewOutcome::Reused, None)), 1, 2);
+        assert_eq!(outcome(&report, root.entity_id()), root_expected);
         let frame = &report.frames[0];
-        assert_eq!(frame.views_rendered, 2);
-        assert_eq!(frame.views_reused, 1);
+        assert_eq!(frame.views_rendered, views_rendered);
+        assert_eq!(frame.views_reused, views_reused);
         assert!(frame.draw_ms > 0.0);
         assert!(frame.bridge_ms <= frame.draw_ms);
         assert!(
