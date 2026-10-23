@@ -9,7 +9,8 @@
 ![Platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-lightgrey.svg)
 [![GitHub stars](https://img.shields.io/github/stars/xxxxzb/gpui-kit-mcp?style=social)](https://github.com/xxxxzb/gpui-kit-mcp/stargazers)
 
-> This is the `gpui-kit-mcp` fork, tracking GPUI Kit 0.7.3 / `gpui-pre` 0.3.9.
+> This is the `gpui-kit-mcp` fork, tracking GPUI Kit 0.7.3 (`gpui-pre` 0.3.9)
+> and GPUI Kit 0.8.0 on its `gpui-fast` renderer (`gpui-fast` 0.1.10).
 > See [FORK.md](FORK.md) for the divergence and upstream sync notes.
 
 Give MCP agents eyes and hands inside a
@@ -227,13 +228,14 @@ For a chat loop, tell the agent something like: "Call `wait_for_messages` with
 the latest id you have seen, act on each message from the app, and answer it
 with `send_message`, then wait again."
 
-## GPUI Kit, `gpui-pre` and `gpui-ce`
+## GPUI Kit, `gpui-pre`, `gpui-fast` and `gpui-ce`
 
-Besides Zed's own GPUI, the bridge works with two GPUI releases on crates.io:
+Besides Zed's own GPUI, the bridge works with three GPUI releases on crates.io:
 
 | GPUI crate | Used by | Supported versions | Bridge feature |
 | --- | --- | --- | --- |
 | `gpui-pre` | GPUI Kit, `gpui-component` | 0.3.5, 0.3.6, 0.3.7, 0.3.9 | `gpui-pre` |
+| `gpui-fast` | GPUI Kit 0.8's retained renderer | 0.1.10 | `gpui-fast` |
 | `gpui-ce` | The community fork and apps built on it | 0.2.2 | `gpui-ce` |
 
 Each needs a small set of GPUI patches, which this repository provides. The
@@ -264,6 +266,40 @@ directly. To see it working, run the [Kit demo](examples/gpui-kit):
 cargo run --manifest-path examples/gpui-kit/Cargo.toml
 ```
 
+### GPUI Kit 0.8.0 on `gpui-fast` 0.1.10
+
+GPUI Kit 0.8 can render through `gpui-fast`, a retained-mode fork of GPUI.
+The bridge supports that renderer too, through the same patched-GPUI
+mechanism: this repository vendors a `gpui-fast` copy carrying the automation
+patch series, and the bridge links it instead of `gpui-pre`.
+
+Kit's two renderers are compile-time alternatives, and the bridge's backend
+feature must match the one Kit renders with. Add this to your workspace's
+`Cargo.toml`:
+
+```toml
+[dependencies]
+gpui-kit = { version = "=0.8.0", features = ["gpui-fast"] }
+gpui-mcp = { git = "https://github.com/xxxxzb/gpui-kit-mcp", branch = "gpui-kit", default-features = false, features = ["gpui-fast"] }
+
+[patch.crates-io]
+gpui-fast = { git = "https://github.com/xxxxzb/gpui-kit-mcp", branch = "gpui-kit" }
+```
+
+Kit's `gpui-pre` dependency stays in the graph but links nothing when the
+`gpui-fast` feature is on; the bridge accepts Kit's `Window` and `App`
+directly, exactly as in the 0.7.3 recipe.
+
+One view-tracking difference is real: the immediate renderer rebuilds an
+uncached view every frame, while `gpui-fast` retains it, so frame reports
+from a fast app attribute fewer renders per interaction. Everything else the
+bridge observes — semantics, provenance, input, screenshots — is the same.
+To see it working, run the [Kit fast demo](examples/gpui-kit-fast):
+
+```console
+cargo run --manifest-path examples/gpui-kit-fast/Cargo.toml
+```
+
 ### `gpui-ce` 0.2.2
 
 Add this to your workspace's `Cargo.toml`:
@@ -288,7 +324,7 @@ vendors. If your app is on an older supported version, or you carry GPUI
 patches of your own, keep your own patched copy instead:
 
 1. From a checkout of this repository, write a patched copy into your app.
-   Pass `--crate gpui-ce` for `gpui-ce`.
+   Pass `--crate gpui-ce` or `--crate gpui-fast` for those crates.
 
    ```console
    cargo xtask vendor --crate gpui-pre --version 0.3.5 --output /path/to/your-app/vendor/gpui-pre
@@ -303,7 +339,8 @@ patches of your own, keep your own patched copy instead:
    ```
 
 The patches are in [`vendor/patches/`](vendor/patches), one folder per crate
-and version. Each version has three:
+and version. The `gpui-pre` and `gpui-ce` series carry three patches each;
+the `gpui-fast` series carries only `automation.patch`:
 
 - `automation.patch` has everything the bridge needs.
 - `font-fallback.patch` is an unrelated font fix. Add `--without font-fallback`

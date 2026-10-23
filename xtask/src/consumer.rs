@@ -2,10 +2,10 @@
 //! bridge from a published Git commit.
 //!
 //! The app follows the README's recipe for one backend: GPUI Kit on gpui-pre,
-//! or gpui-ce with its platform crate. It type-checks `BridgeHandle::install`
-//! with that backend's `Window` and `App`, and verifies that the app's GPUI
-//! crates and the bridge all share the one patched GPUI package from the
-//! requested commit.
+//! GPUI Kit 0.8 on its gpui-fast renderer, or gpui-ce with its platform crate.
+//! It type-checks `BridgeHandle::install` with that backend's `Window` and
+//! `App`, and verifies that the app's GPUI crates and the bridge all share
+//! the one patched GPUI package from the requested commit.
 
 use std::collections::HashMap;
 use std::fs;
@@ -20,10 +20,13 @@ use serde_json::Value;
 pub(crate) enum Backend {
     /// GPUI Kit 0.7.3 on gpui-pre 0.3.9.
     #[value(name = "gpui-kit")]
-    GpuiKit,
+    Kit,
+    /// GPUI Kit 0.8.0 on its gpui-fast 0.1.10 renderer.
+    #[value(name = "gpui-fast")]
+    Fast,
     /// gpui-ce 0.2.2 with `gpui_ce_platform`.
     #[value(name = "gpui-ce")]
-    GpuiCe,
+    Ce,
 }
 
 struct Recipe {
@@ -37,19 +40,24 @@ struct Recipe {
     types: &'static str,
     /// Every package that must link the one patched GPUI.
     owners: &'static [&'static str],
+    /// GPUI packages the graph may link unpatched beside the patched one.
+    /// Kit 0.8 keeps a hard `gpui-pre` dependency while rendering through
+    /// gpui-fast; nothing links it when the fast feature is on.
+    extra_gpui: &'static [&'static str],
 }
 
 impl Backend {
     fn name(self) -> &'static str {
         match self {
-            Self::GpuiKit => "gpui-kit",
-            Self::GpuiCe => "gpui-ce",
+            Self::Kit => "gpui-kit",
+            Self::Fast => "gpui-fast",
+            Self::Ce => "gpui-ce",
         }
     }
 
     fn recipe(self) -> Recipe {
         match self {
-            Self::GpuiKit => Recipe {
+            Self::Kit => Recipe {
                 dependencies: "gpui-kit = \"=0.7.3\"",
                 feature: "gpui-pre",
                 gpui: ("gpui-pre", "0.3.9"),
@@ -61,13 +69,23 @@ impl Backend {
                     "gpui-mcp",
                     "gpui-pre-platform",
                 ],
+                extra_gpui: &[],
             },
-            Self::GpuiCe => Recipe {
+            Self::Fast => Recipe {
+                dependencies: "gpui-kit = { version = \"=0.8.0\", features = [\"gpui-fast\"] }",
+                feature: "gpui-fast",
+                gpui: ("gpui-fast", "0.1.10"),
+                types: "gpui_kit",
+                owners: &["gpui-kit", "gpui-mcp"],
+                extra_gpui: &["gpui-pre"],
+            },
+            Self::Ce => Recipe {
                 dependencies: "gpui-ce = \"=0.2.2\"\ngpui_ce_platform = \"=0.1.0\"",
                 feature: "gpui-ce",
                 gpui: ("gpui-ce", "0.2.2"),
                 types: "gpui",
                 owners: &["gpui-mcp", "gpui_ce_platform"],
+                extra_gpui: &[],
             },
         }
     }
@@ -232,11 +250,28 @@ fn verify(metadata: &Value, recipe: &Recipe, rev: &str) -> Result<()> {
             .context("node has no deps")?
             .iter()
             .filter_map(|dep| dep["pkg"].as_str())
-            .filter(|pkg| matches!(names.get(pkg), Some(&("gpui" | "gpui-pre" | "gpui-ce"))))
+            .filter(|pkg| {
+                matches!(
+                    names.get(pkg),
+                    Some(&("gpui" | "gpui-pre" | "gpui-ce" | "gpui-fast"))
+                )
+            })
             .collect();
-        if gpui != [snapshot["id"].as_str().unwrap_or_default()] {
-            bail!("{owner} does not use exactly the patched {gpui_package} package: {gpui:?}");
+        let patched = snapshot["id"].as_str().unwrap_or_default();
+        let (linked, others): (Vec<&str>, Vec<&str>) =
+            gpui.iter().copied().partition(|pkg| *pkg == patched);
+        for other in others {
+            let other_name = names.get(other).copied().unwrap_or_default();
+            ensure!(
+                recipe.extra_gpui.contains(&other_name),
+                "{owner} links unpatched {other_name} beside the patched \
+                 {gpui_package}: {gpui:?}"
+            );
         }
+        ensure!(
+            linked.len() == 1,
+            "{owner} does not use exactly the patched {gpui_package} package: {gpui:?}"
+        );
     }
     Ok(())
 }

@@ -108,6 +108,15 @@ jobs:
       - name: Test GPUI Kit controls and input
         run: cargo test --manifest-path examples/gpui-kit/Cargo.toml --locked
 
+      - name: Check GPUI Kit fast example formatting
+        run: cargo fmt --manifest-path examples/gpui-kit-fast/Cargo.toml -- --check
+
+      - name: Check GPUI Kit fast integration
+        run: cargo check --manifest-path examples/gpui-kit-fast/Cargo.toml --all-targets --locked
+
+      - name: Test GPUI Kit fast controls and input
+        run: cargo test --manifest-path examples/gpui-kit-fast/Cargo.toml --locked
+
       - name: Clippy GPUI Kit bridge
         run: cargo clippy -p gpui-mcp --all-targets --no-default-features --features gpui-pre,test-support --locked -- -D warnings
 
@@ -388,6 +397,14 @@ jobs:
           REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
         run: >-
           cargo xtask check-consumer --backend gpui-kit
+          --repository "$REPOSITORY_URL" --rev "$REV"
+          --target-dir "$GITHUB_WORKSPACE/target"
+
+      - name: Check external GPUI Kit fast consumer
+        env:
+          REPOSITORY_URL: ${{ github.server_url }}/${{ github.repository }}
+        run: >-
+          cargo xtask check-consumer --backend gpui-fast
           --repository "$REPOSITORY_URL" --rev "$REV"
           --target-dir "$GITHUB_WORKSPACE/target"
 
