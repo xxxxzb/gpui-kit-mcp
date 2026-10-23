@@ -64,6 +64,29 @@ let bridge = BridgeHandle::install(
 集成就这些。客户端会自己发现正在运行的应用。
 完整窗口示例见 [demo](examples/demo/src/main.rs)。
 
+### 多应用与多代理
+
+每个 `gpui-mcp` 服务进程各自保存选中目标。要让多个代理驱动不同的应用实例，
+给每个实例配一个独立的服务条目：
+
+```json
+{
+  "mcpServers": {
+    "gpui-a": { "command": "gpui-mcp", "args": ["--endpoint", "<descriptor-a>.json"] },
+    "gpui-b": { "command": "gpui-mcp", "args": ["--endpoint", "<descriptor-b>.json"] }
+  }
+}
+```
+
+描述符文件位于运行根目录下的 `run/`：macOS 是
+`~/Library/Application Support/gpui-mcp/run`，Linux 是
+`$XDG_RUNTIME_DIR/gpui-mcp/run`，Windows 是 `%LOCALAPPDATA%\gpui-mcp\run`。
+`BridgeHandle::endpoint_path()` 会返回运行中应用的描述符路径。应用退出时该文件
+会被删除，重启后文件名会变，所以应用重启后需要更新这个条目。
+
+只配一个服务条目、又有多个应用存活时，先调用 `list_apps`，再调用
+`select_app`。未选中目标的 app-scoped 调用会失败并返回存活目标列表。
+
 ## 让界面适合 agent 使用
 
 语义树由实际渲染的元素和无障碍数据构建。大多数问题来自下面几条。

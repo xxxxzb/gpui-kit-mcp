@@ -66,6 +66,30 @@ let bridge = BridgeHandle::install(
 That is the whole integration. The client discovers running apps on its own.
 See the [demo](examples/demo/src/main.rs) for a complete window.
 
+### Multiple apps or agents
+
+Each `gpui-mcp` server process keeps its own selection. To let several agents
+drive different app instances, give each instance its own server entry:
+
+```json
+{
+  "mcpServers": {
+    "gpui-a": { "command": "gpui-mcp", "args": ["--endpoint", "<descriptor-a>.json"] },
+    "gpui-b": { "command": "gpui-mcp", "args": ["--endpoint", "<descriptor-b>.json"] }
+  }
+}
+```
+
+Descriptor files live in `run/` under the runtime root: `~/Library/Application
+Support/gpui-mcp/run` on macOS, `$XDG_RUNTIME_DIR/gpui-mcp/run` on Linux, and
+`%LOCALAPPDATA%\gpui-mcp\run` on Windows. `BridgeHandle::endpoint_path()`
+returns the descriptor path of a running app. The file is removed on shutdown
+and gets a new name on restart, so update the entry when the app restarts.
+
+With one server entry and several live apps, call `list_apps`, then
+`select_app`. App-scoped calls without a selection fail with the live target
+list.
+
 ## Making your UI agent-ready
 
 The tree is built from your rendered elements and their accessibility data.
